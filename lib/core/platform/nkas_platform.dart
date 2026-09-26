@@ -564,6 +564,11 @@ class NkasPlatform {
     String? mode,
     bool? useTailscale,
     String? requestId,
+    int? displayId,
+    String? displayIdentity,
+    String? displaySocket,
+    String? deviceUid,
+    String? bootId,
   }) async {
     if (!supported) throw UnsupportedError('原生 scrcpy 仅支持 Android 和 iOS');
     final value = await _channel.invokeMethod<Object?>('nativeScrcpyStart', {
@@ -576,6 +581,11 @@ class NkasPlatform {
       'mode': ?mode,
       'useTailscale': ?useTailscale,
       'requestId': ?requestId,
+      'displayId': ?displayId,
+      'displayIdentity': ?displayIdentity,
+      'displaySocket': ?displaySocket,
+      'deviceUid': ?deviceUid,
+      'bootId': ?bootId,
     });
     return NativeScrcpyStart.fromMap(_map(value));
   }

@@ -53,7 +53,7 @@ class NativeAdbClient(
             output = newSocket.getOutputStream()
             keyPair = keyStore.loadOrCreate()
             handshake()
-            newSocket.soTimeout = 0
+            socket?.soTimeout = 0
             reader = Thread(::readLoop, "nkas-adb-reader").apply { isDaemon = true; start() }
         } catch (error: Exception) {
             close()
@@ -206,7 +206,7 @@ class NativeAdbClient(
             input = DataInputStream(tlsSocket.inputStream)
             output = tlsSocket.outputStream
         } catch (error: Exception) {
-            throw if (error is IOException) error else IOException("ADB TLS upgrade failed", error)
+            throw if (error is IOException) error else IOException("ADB TLS upgrade failed: ${error.message}", error)
         }
     }
 

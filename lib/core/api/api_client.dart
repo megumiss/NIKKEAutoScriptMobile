@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:nkas_mobile/core/api/virtual_display_target.dart';
 
 import 'package:http/http.dart' as http;
 import 'package:nkas_mobile/core/api/backend_address.dart';
@@ -370,6 +371,38 @@ class ApiClient {
     } on FormatException {
       throw const ApiException('后端返回了无效实例配置');
     }
+  }
+
+  Future<VirtualDisplayTarget?> fetchVirtualDisplay(
+    String baseUrl,
+    String name,
+  ) async {
+    final response = await _client
+        .get(
+          endpoint(
+            baseUrl,
+            '/api/${Uri.encodeComponent(name)}/virtual-display',
+          ),
+        )
+        .timeout(timeout);
+    if (response.statusCode == 404) {
+      final config = await fetchInstanceConfig(baseUrl, name);
+      final physical = (config['Emulator'] as Map?)?['PhysicalDevice'] as Map?;
+      if (physical?['Enable'] == true && physical?['VirtualDisplay'] == true) {
+        throw const ApiException('请更新后端以连接现有虚拟屏幕');
+      }
+      return null;
+    }
+    if (response.statusCode != 200) {
+      throw ApiException('虚拟屏幕查询失败 HTTP ${response.statusCode}');
+    }
+    final data = jsonDecode(utf8.decode(response.bodyBytes));
+    if (data is! Map<String, dynamic>) throw const ApiException('虚拟屏幕状态无效');
+    if (data['enabled'] == false) return null;
+    if (data['available'] != true) {
+      throw ApiException(data['reason']?.toString() ?? '虚拟屏幕不可用');
+    }
+    return VirtualDisplayTarget.fromJson(data);
   }
 
   Future<void> patchConfig(

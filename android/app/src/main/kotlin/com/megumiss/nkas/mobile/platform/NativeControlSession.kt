@@ -11,6 +11,7 @@ import com.megumiss.nkas.mobile.platform.adb.NativeAdbManager
 import com.megumiss.nkas.mobile.platform.scrcpy.NativeScrcpyLauncher
 import com.megumiss.nkas.mobile.platform.scrcpy.NativeScrcpySession
 import com.megumiss.nkas.mobile.platform.scrcpy.ScrcpyServerOptions
+import com.megumiss.nkas.mobile.platform.scrcpy.ManagedDisplayTarget
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.TextureRegistry
@@ -53,6 +54,7 @@ class NativeControlSession(
     private data class Request(
         val id: String, val endpoint: String, val mode: String,
         val tailscale: Boolean, val options: ScrcpyServerOptions,
+        val display: ManagedDisplayTarget? = null,
     )
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -156,13 +158,19 @@ class NativeControlSession(
                     require(mode != "local_virtual_display" || parsed.host in setOf("localhost", "127.0.0.1", "::1")) {
                         "本机虚拟屏幕需使用本机无线调试地址"
                     }
+                    val display = call.argument<Int>("displayId")?.let {
+                        ManagedDisplayTarget(it, call.argument<String>("displayIdentity").orEmpty(),
+                            call.argument<String>("displaySocket").orEmpty(), call.argument<String>("deviceUid").orEmpty(),
+                            call.argument<String>("bootId").orEmpty())
+                    }
+                    require(mode != "local_virtual_display" || display != null) { "请先启动实例的虚拟屏幕" }
                     val options = ScrcpyServerOptions(video = call.argument<Boolean>("video") ?: true,
                         control = call.argument<Boolean>("control") ?: true, maxSize = call.argument<Int>("maxSize") ?: 0,
                         videoBitRate = call.argument<Int>("videoBitRate") ?: 0,
-                        videoCodec = call.argument<String>("videoCodec") ?: "h264", newDisplay = mode == "local_virtual_display")
+                        videoCodec = call.argument<String>("videoCodec") ?: "h264", displayId = display?.displayId)
                     val token = interrupt("新的控制会话")
                     val request = Request(call.argument<String>("requestId") ?: token.toString(), endpoint, mode,
-                        mode == "remote_adb" && (call.argument<Boolean>("useTailscale") ?: settings.tailscaleEnabled), options)
+                        mode == "remote_adb" && (call.argument<Boolean>("useTailscale") ?: settings.tailscaleEnabled), options, display)
                     desired = request
                     retries.set(0)
                     execute(call.method, result) { start(request, token) }
@@ -198,6 +206,14 @@ class NativeControlSession(
             if (request.mode == "local_virtual_display") importLocalIdentity(token)
             adb.connect(route, localIdentity = request.mode == "local_virtual_display", isCancelled = { !isCurrent(token) })
             ensureCurrent(token)
+            request.display?.let { target ->
+                target.checkDevice(adb.shell("getprop ro.serialno"), adb.shell("cat /proc/sys/kernel/random/boot_id"))
+                adb.openAbstractSocket(target.socket).use { bridge ->
+                    bridge.outputStream.write("INFO\n".toByteArray(Charsets.UTF_8))
+                    target.checkInfo(bridge.inputStream.bufferedReader().readLine().orEmpty())
+                }
+                ensureCurrent(token)
+            }
             val jar = app.assets.open("bin/scrcpy-server-v4.1").use { it.readBytes() }
             val running = NativeScrcpyLauncher(adb).start(jar, request.options)
             session = running

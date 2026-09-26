@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nkas_mobile/core/api/instance_info.dart';
+import 'package:nkas_mobile/core/api/virtual_display_target.dart';
 import 'package:nkas_mobile/core/platform/nkas_platform.dart';
 import 'package:nkas_mobile/core/widgets/floating_action.dart';
 import 'package:nkas_mobile/features/screen/native_video_surface.dart';
@@ -41,6 +42,119 @@ Future<double> dragToScroll(
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  VirtualDisplayTarget display(String session) => VirtualDisplayTarget(
+    displayId: 11,
+    identity: 'abc123def456',
+    socket: session,
+    sessionId: session,
+    deviceUid: 'phone',
+    bootId: 'boot',
+    serial: 'serial',
+  );
+
+  testWidgets('cancel during target lookup prevents a late native connection', (
+    tester,
+  ) async {
+    final calls = <MethodCall>[];
+    _mockPlatform(calls);
+    final pending = Completer<VirtualDisplayTarget?>();
+    await tester.pumpWidget(
+      host(
+        ScreenPanel(
+          platform: NkasPlatform.testing(events: const Stream.empty()),
+          accessGranted: true,
+          loadScreenshot: () async => null,
+          resolveDisplay: () => pending.future,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('连接设备'));
+    await tester.pump();
+    await tester.tap(find.byTooltip('断开控制'));
+    await tester.pump();
+    pending.complete(display('first'));
+    await tester.pump();
+    expect(calls.where((c) => c.method == 'nativeScrcpyStart'), isEmpty);
+    expect(find.byTooltip('连接设备'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'new session with the same display ID stops old input and reconnects explicitly',
+    (tester) async {
+      final calls = <MethodCall>[];
+      _mockPlatform(calls);
+      final events = StreamController<NkasPlatformEvent>.broadcast();
+      var target = display('first');
+      await tester.pumpWidget(
+        host(
+          SingleChildScrollView(
+            child: ScreenPanel(
+              platform: NkasPlatform.testing(events: events.stream),
+              accessGranted: true,
+              loadScreenshot: () async => null,
+              resolveDisplay: () async => target,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byTooltip('连接设备'));
+      await tester.pump();
+      final start =
+          calls.lastWhere((c) => c.method == 'nativeScrcpyStart').arguments
+              as Map;
+      final id = start['requestId'] as String;
+      expect(start['displayId'], 11);
+      expect(start['displaySocket'], 'first');
+      events.add(
+        ScrcpyVideoEvent(
+          state: 'started',
+          requestId: id,
+          textureId: 9,
+          width: 720,
+          height: 1280,
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(Texture), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2));
+      expect(calls.where((c) => c.method == 'nativeScrcpyStop'), isEmpty);
+      target = display('second');
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump();
+      expect(find.byType(Texture), findsNothing);
+      expect(find.text('虚拟屏幕已变化，请重新连接'), findsOneWidget);
+      expect(
+        (calls.lastWhere((c) => c.method == 'nativeScrcpyStop').arguments
+            as Map)['requestId'],
+        id,
+      );
+      events.add(
+        ScrcpyVideoEvent(
+          state: 'started',
+          requestId: id,
+          textureId: 10,
+          width: 720,
+          height: 1280,
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(Texture), findsNothing);
+      expect(calls.where((c) => c.method == 'nativeScrcpyStart'), hasLength(1));
+      await tester.tap(find.byTooltip('连接设备'));
+      await tester.pump();
+      expect(
+        (calls.lastWhere((c) => c.method == 'nativeScrcpyStart').arguments
+            as Map)['displaySocket'],
+        'second',
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      await events.close();
+    },
+  );
 
   testWidgets('press stays down through a long hold and cancel releases it', (
     tester,
@@ -145,7 +259,8 @@ void main() {
       // 否则「画面拖动不滚」只能说明拖动本身没生效
       final onBlank = await dragToScroll(
         tester,
-        tester.getCenter(find.byType(NativeVideoSurface)) + const Offset(0, 400),
+        tester.getCenter(find.byType(NativeVideoSurface)) +
+            const Offset(0, 400),
       );
       expect(onBlank, greaterThan(0));
       position.jumpTo(0);

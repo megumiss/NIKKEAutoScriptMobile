@@ -11,7 +11,6 @@ import java.math.BigInteger
 import java.net.Socket
 import java.security.PrivateKey
 import java.security.SecureRandom
-import java.security.Security
 import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.util.Date
@@ -34,9 +33,6 @@ internal object AdbTlsIdentity {
 
     private fun createContext(keyPair: AdbKeyPair): SSLContext {
         val conscrypt = Conscrypt.newProviderBuilder().build()
-        if (Security.getProvider(conscrypt.name) == null) Security.insertProviderAt(conscrypt, 1)
-        val bc = BouncyCastleProvider()
-        if (Security.getProvider(bc.name) == null) Security.addProvider(bc)
 
         val certificate = createCertificate(keyPair.privateKey, keyPair.publicKey)
         val keyManagers = arrayOf(AdbKeyManager(keyPair.privateKey, certificate))
@@ -46,10 +42,11 @@ internal object AdbTlsIdentity {
         }
     }
 
-    private fun createCertificate(privateKey: PrivateKey, publicKey: java.security.PublicKey): X509Certificate {
+    internal fun createCertificate(privateKey: PrivateKey, publicKey: java.security.PublicKey): X509Certificate {
         val now = System.currentTimeMillis()
         val signer = JcaContentSignerBuilder("SHA256withRSA")
-            .setProvider(BouncyCastleProvider.PROVIDER_NAME)
+            // Android also registers a stripped provider named BC; use our bundled provider instance.
+            .setProvider(BouncyCastleProvider())
             .build(privateKey)
         val subject = X500Name("CN=00")
         val builder = X509v3CertificateBuilder(

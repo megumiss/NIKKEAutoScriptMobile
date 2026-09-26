@@ -544,7 +544,7 @@ class _NativeControlPageState extends State<NativeControlPage> {
               Surface(
                 padding: const EdgeInsets.all(12),
                 child: Text(
-                  '使用已完成无线调试配对的本机，创建独立虚拟屏幕。可在“初始化 NKAS”中完成配对。',
+                  '连接已完成无线调试配对的本机，使用当前实例已有的虚拟屏幕。请先启动实例任务；可在“初始化 NKAS”中完成配对。',
                   style: theme.textTheme.muted,
                 ),
               ),

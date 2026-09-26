@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:nkas_mobile/core/api/virtual_display_target.dart';
 
 import 'package:flutter/foundation.dart';
 
@@ -456,6 +457,13 @@ class ConnectionController extends ChangeNotifier {
       return Future.error(const ApiException('后端未连接'));
     }
     return _api.fetchInstanceConfig(_state.baseUrl, name);
+  }
+
+  Future<VirtualDisplayTarget?> fetchVirtualDisplay(String name) {
+    if (_state.phase != ConnectionPhase.connected) {
+      return Future.error(const ApiException('后端未连接'));
+    }
+    return _api.fetchVirtualDisplay(_state.baseUrl, name);
   }
 
   Future<void> patchConfig(String name, String key, Object? value) {

@@ -703,6 +703,7 @@ class _NkasShellState extends State<NkasShell> {
           widget.connectionController.fetchScreenshot(instance),
       accessGranted: _starAccessGranted,
       resolveEndpoint: _resolveControlEndpoint,
+      resolveDisplay: widget.connectionController.fetchVirtualDisplay,
       onOpenNativeControl: () => _pushSubPage(
         '控制连接',
         NativeControlPage(

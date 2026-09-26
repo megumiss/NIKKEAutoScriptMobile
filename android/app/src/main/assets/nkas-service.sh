@@ -46,12 +46,22 @@ port_in_use() {
 }
 
 kill_service() {
-    if is_running; then
-        kill "$(cat "$PID_FILE")" 2>/dev/null || true
+    if [ -f "$REPO_DIR/scripts/stop_service.py" ]; then
+        proot-distro run -b "$REPO_DIR:/app/NIKKEAutoScript" -w /app/NIKKEAutoScript \
+            nkas -- /usr/local/bin/python scripts/stop_service.py || return 1
+    elif is_running || port_in_use; then
+        echo "请先更新 NKAS 后端以支持确认服务退出与虚拟屏幕清理" >&2
+        return 1
     fi
-    # proot-distro 不转发信号，启动器退出后内层 python 可能继续占用端口。
-    # 这只对同一个 Termux 进程树内有效；跨 uid 的残留进程杀不到，见下方提示。
-    pkill -f 'gui[.]py' 2>/dev/null || true
+    local attempt=0
+    while is_running && [ "$attempt" -lt 10 ]; do
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+    if is_running || port_in_use; then
+        echo "服务尚未确认退出，停止未完成" >&2
+        return 1
+    fi
     rm -f "$PID_FILE"
 }
 
@@ -70,7 +80,7 @@ start_service() {
         echo "running"
         return 0
     fi
-    kill_service
+    kill_service || return 1
     # Something still answers on the port but failed the health probe above:
     # a process from a previous Termux survived and cannot be signalled from
     # here. Starting a new instance would only fail to bind and exit silently,
@@ -90,7 +100,7 @@ start_service() {
 }
 
 stop_service() {
-    kill_service
+    kill_service || return 1
     echo "stopped"
 }
 
@@ -106,7 +116,7 @@ status_service() {
 case "${1:-status}" in
     start) start_service ;;
     stop) stop_service ;;
-    restart) stop_service; start_service ;;
+    restart) stop_service && start_service ;;
     status) status_service ;;
     *) echo "usage: $0 {start|stop|restart|status}" >&2; exit 2 ;;
 esac
