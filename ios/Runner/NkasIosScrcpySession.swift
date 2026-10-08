@@ -7,6 +7,11 @@ struct NkasIosScrcpyOptions {
   let maxSize: Int
   let videoBitRate: Int
   var videoCodec = "h264"
+  var displayId: Int? = nil
+  var displayIdentity: String? = nil
+  var displaySocket: String? = nil
+  var deviceUid: String? = nil
+  var bootId: String? = nil
 }
 
 struct NkasIosScrcpyMetadata {
@@ -42,6 +47,24 @@ final class NkasIosScrcpySession {
   }
 
   static func start(adb: NkasIosAdbClient, serverJar: Data, options: NkasIosScrcpyOptions) throws -> NkasIosScrcpySession {
+    if let displayId = options.displayId {
+      guard displayId > 0, let identity = options.displayIdentity, let socket = options.displaySocket,
+            socket.range(of: "^nkas-vd-[a-f0-9]{32}$", options: .regularExpression) != nil,
+            identity.range(of: "^[a-z0-9]{12}$", options: .regularExpression) != nil,
+            try adb.shell("getprop ro.serialno").trimmingCharacters(in: .whitespacesAndNewlines) == options.deviceUid,
+            try adb.shell("cat /proc/sys/kernel/random/boot_id").trimmingCharacters(in: .whitespacesAndNewlines) == options.bootId else {
+        throw NkasIosAdbError.remote("虚拟屏幕所属设备无法核验")
+      }
+      let bridge = try adb.openLocalAbstract(socket)
+      defer { bridge.close() }
+      try bridge.write(Data("INFO\n".utf8))
+      let response = String(decoding: try bridge.readToClose(limit: 1024), as: UTF8.self)
+      let fields = response.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+      guard response.hasPrefix("OK "), fields.contains("id=\(displayId)"),
+            fields.contains("identity=\(identity)"), fields.contains("socket=\(socket)") else {
+        throw NkasIosAdbError.remote("虚拟屏幕已失效，请重新连接")
+      }
+    }
     guard !serverJar.isEmpty, options.video || options.control,
           (0...65535).contains(options.maxSize), options.videoBitRate >= 0,
           options.videoBitRate <= Int(Int32.max), ["h264", "h265"].contains(options.videoCodec) else {
@@ -161,6 +184,7 @@ final class NkasIosScrcpySession {
       "video_codec=\(options.videoCodec)", "log_level=warn", "clipboard_autosync=false",
     ]
     if !options.video { args.append("video=false") }
+    if let displayId = options.displayId { args.append("display_id=\(displayId)") }
     if !options.control { args.append("control=false") }
     if options.maxSize > 0 { args.append("max_size=\(options.maxSize)") }
     if options.videoBitRate > 0 { args.append("video_bit_rate=\(options.videoBitRate)") }

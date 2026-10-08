@@ -10,6 +10,7 @@ data class ScrcpyServerOptions(
     val videoBitRate: Int = 0,
     val videoCodec: String = "h264",
     val newDisplay: Boolean = false,
+    val displayId: Int? = null,
 ) {
     init {
         require(maxSize >= 0) { "maxSize must be non-negative" }
@@ -17,6 +18,7 @@ data class ScrcpyServerOptions(
         require(!audio && (video || control)) { "Enable video or control; audio is unsupported" }
         require(videoCodec in setOf("h264", "h265")) { "Unsupported video codec" }
         require(!newDisplay || video) { "Virtual display requires video" }
+        require(displayId == null || (displayId > 0 && !newDisplay)) { "Existing display ID must be positive" }
     }
 }
 
@@ -48,6 +50,7 @@ internal object ScrcpyServerCommand {
             if (options.maxSize > 0) add("max_size=${options.maxSize}")
             if (options.videoBitRate > 0) add("video_bit_rate=${options.videoBitRate}")
             if (options.videoCodec != "h264") add("video_codec=${options.videoCodec}")
+            options.displayId?.let { add("display_id=$it") }
             if (options.newDisplay) {
                 add("new_display=1080x1920/320")
                 add("vd_destroy_content=false")

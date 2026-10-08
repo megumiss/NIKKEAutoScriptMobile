@@ -133,6 +133,11 @@ final class NkasNativeSession {
                                          maxSize: args["maxSize"] as? Int ?? 0,
                                          videoBitRate: args["videoBitRate"] as? Int ?? 0)
       options.videoCodec = args["videoCodec"] as? String ?? "h264"
+      options.displayId = args["displayId"] as? Int
+      options.displayIdentity = args["displayIdentity"] as? String
+      options.displaySocket = args["displaySocket"] as? String
+      options.deviceUid = args["deviceUid"] as? String
+      options.bootId = args["bootId"] as? String
       let endpoint = args["endpoint"] as? String ?? settings.endpoint
       let request = Request(id: args["requestId"] as? String ?? UUID().uuidString,
                             endpoint: endpoint.isEmpty ? settings.endpoint : endpoint,

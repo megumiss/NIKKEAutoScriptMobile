@@ -108,12 +108,12 @@ sequenceDiagram
     P->>D: 控制消息经 ADB 通道发送
 ```
 
-[screen_page.dart](../lib/features/screen/screen_page.dart) 为每次连接生成 `requestId`，读取独立控制配置，再调用 `NkasPlatform.nativeScrcpyStart()`。页面默认请求 H.264、最大尺寸 1920、码率 8 Mbps，音频关闭。原生协议层支持 H.264 / H.265，实际解码能力由设备决定。
+[screen_page.dart](../lib/features/screen/screen_page.dart) 为每次连接生成 `requestId`，读取独立控制配置，并通过 `/api/{name}/virtual-display` 解析实例屏幕，再调用 `NkasPlatform.nativeScrcpyStart()`。虚拟屏目标包含数字 ID、稳定标识、socket 会话、设备标识和开机标识；已启用但不可用时直接报错。页面默认请求 H.264、最大尺寸 1920、码率 8 Mbps，音频关闭。原生协议层支持 H.264 / H.265，实际解码能力由设备决定。
 
 原生会话完成以下工作：
 
 1. 停止旧会话，建立 ADB 直连或 Tailscale 回环转发；本机虚拟屏幕模式先导入已配对的本机身份。
-2. 经 ADB sync 推送应用携带的 scrcpy server 4.1 到目标 `/data/local/tmp/`，再用 `app_process` 启动。
+2. 受管理的虚拟屏先核对设备、开机标识及桥接 `INFO`；经 ADB sync 推送应用携带的 scrcpy server 4.1 到目标 `/data/local/tmp/`，再用 `app_process` 与当前 `display_id` 启动。Android/iOS 使用相同的目标字段，普通远程主屏控制沿用已有行为。
 3. 为本次会话生成 `scid`，通过 ADB 打开 `localabstract:scrcpy_<scid>` 流。`tunnel_forward=true` 模式下，视频和控制使用各自通道，不对外新增独立视频端口。
 4. 读取设备名和编码元数据，解析视频尺寸、配置包和帧包，交给原生解码器。
 5. 首帧到达才发送 `scrcpyVideo/started`。方法返回或 Texture ID 分配成功均不等于已经出图；首帧等待有超时处理。
@@ -201,7 +201,11 @@ flowchart TD
 
 初始化页通过命令回执、脚本状态和日志了解进度，回调超时不等于脚本退出；已有安装进程时接续查询，真实脚本失败才进入重试。运行状态文件位于 Termux 的 `$HOME/.nkas/`。
 
-无线调试配对后，原生 ADB 导入配对身份到独立的 `native-adb/local` 目录，连接本机回环调试端口。scrcpy 使用 `new_display=1080x1920/320` 和 `vd_destroy_content=false` 请求虚拟屏幕。该模式不经过 tsnet，Termux 负责部署与配对，视频解码和输入仍由应用内原生代码处理。
+无线调试配对后，原生 ADB 导入配对身份到独立的 `native-adb/local` 目录，连接本机回环调试端口。屏幕由 NKAS 后端创建和持有，scrcpy 使用解析出的 `display_id` 连接同一块屏幕，不使用 `new_display`。该模式不经过 tsnet，Termux 负责部署与配对，视频解码和输入仍由应用内原生代码处理。
+
+Flutter 每两秒重新核验活动虚拟屏。目标失效或会话变化时停止旧视频与输入，用户通过原有连接按钮重新连接；相同数字 ID 不代表相同会话。取消尚未完成的解析不会迟到启动控制。停止 worker 或退出画面不销毁后端屏幕。
+
+Android 服务脚本调用后端 `scripts/stop_service.py`，通过工作目录、PID 和进程创建时间核对服务；热重载模式先等待实际服务清理，再等待启动器退出。退出超时或资源未确认清理时返回失败，重启不会继续启动第二个服务。运行中的旧后端缺少该脚本时提示先更新后端。
 
 ## 授权与故障边界
 

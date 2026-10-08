@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:nkas_mobile/core/api/virtual_display_target.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -30,6 +31,7 @@ class ScreenPage extends StatelessWidget {
     required this.accessGranted,
     required this.onOpenNativeControl,
     this.resolveEndpoint,
+    this.resolveDisplay,
     super.key,
   });
   final List<InstanceInfo> instances;
@@ -45,6 +47,7 @@ class ScreenPage extends StatelessWidget {
 
   /// 解析实例的生效控制地址：实例覆盖 → 全局手填 → 后端 Serial
   final Future<String?> Function(String instance)? resolveEndpoint;
+  final Future<VirtualDisplayTarget?> Function(String instance)? resolveDisplay;
 
   @override
   Widget build(BuildContext context) {
@@ -83,6 +86,9 @@ class ScreenPage extends StatelessWidget {
               resolveEndpoint: resolveEndpoint == null
                   ? null
                   : () => resolveEndpoint!(selected),
+              resolveDisplay: resolveDisplay == null
+                  ? null
+                  : () => resolveDisplay!(selected),
             ),
           ),
         ),
@@ -98,6 +104,7 @@ class ScreenPanel extends StatefulWidget {
     this.onOpenNativeControl,
     this.platform,
     this.resolveEndpoint,
+    this.resolveDisplay,
     super.key,
   });
   final Future<ScreenshotFrame?> Function() loadScreenshot;
@@ -107,6 +114,7 @@ class ScreenPanel extends StatefulWidget {
 
   /// 解析当前实例的生效控制地址；为空时回退到设置中的全局地址
   final Future<String?> Function()? resolveEndpoint;
+  final Future<VirtualDisplayTarget?> Function()? resolveDisplay;
   @override
   State<ScreenPanel> createState() => _ScreenPanelState();
 }
@@ -126,6 +134,9 @@ class _ScreenPanelState extends State<ScreenPanel> {
   String nativeState = 'idle';
   String? requestId;
   String? controlTarget;
+  VirtualDisplayTarget? activeDisplay;
+  Timer? displayCheck;
+  bool checkingDisplay = false;
   bool _fullscreenOpen = false;
   NavigatorState? _rootNavigator;
 
@@ -160,6 +171,7 @@ class _ScreenPanelState extends State<ScreenPanel> {
 
   @override
   void dispose() {
+    displayCheck?.cancel();
     timer?.cancel();
     unawaited(platformEvents?.cancel());
     _closeFullscreen();
@@ -217,6 +229,9 @@ class _ScreenPanelState extends State<ScreenPanel> {
 
   Future<void> _startNativeVideo() async {
     if (!platform.supported || !widget.accessGranted) return;
+    displayCheck?.cancel();
+    displayCheck = null;
+    activeDisplay = null;
     final previous = requestId;
     final id = '${DateTime.now().microsecondsSinceEpoch}-${++nextRequest}';
     requestId = id;
@@ -230,6 +245,11 @@ class _ScreenPanelState extends State<ScreenPanel> {
         await platform.nativeScrcpyStop(requestId: previous);
       }
       final settings = await platform.nativeControlSettings();
+      final display = await widget.resolveDisplay?.call();
+      if (settings.mode == NativeControlMode.localVirtualDisplay &&
+          display == null) {
+        throw StateError('当前实例没有可连接的虚拟屏幕，请先启动任务');
+      }
       var endpoint = settings.endpoint;
       final resolver = widget.resolveEndpoint;
       if (settings.mode == NativeControlMode.remoteAdb && resolver != null) {
@@ -260,7 +280,21 @@ class _ScreenPanelState extends State<ScreenPanel> {
         requestId: id,
         maxSize: 1920,
         videoBitRate: 8_000_000,
+        displayId: display?.displayId,
+        displayIdentity: display?.identity,
+        displaySocket: display?.socket,
+        deviceUid: display?.deviceUid,
+        bootId: display?.bootId,
       );
+      if (!mounted || requestId != id) return;
+      activeDisplay = display;
+      displayCheck?.cancel();
+      if (display != null) {
+        displayCheck = Timer.periodic(
+          const Duration(seconds: 2),
+          (_) => _checkDisplay(),
+        );
+      }
       // A texture can be allocated before a decodable frame exists. Only the started event enables it.
     } catch (exception) {
       if (mounted && requestId == id) _nativeFailure(exception);
@@ -268,6 +302,9 @@ class _ScreenPanelState extends State<ScreenPanel> {
   }
 
   Future<void> _stopNative() async {
+    displayCheck?.cancel();
+    displayCheck = null;
+    activeDisplay = null;
     final id = requestId;
     requestId = null;
     if (mounted) {
@@ -286,6 +323,28 @@ class _ScreenPanelState extends State<ScreenPanel> {
     if (mounted) {
       _startPolling();
       unawaited(_load());
+    }
+  }
+
+  Future<void> _checkDisplay() async {
+    if (checkingDisplay || activeDisplay == null || requestId == null) return;
+    checkingDisplay = true;
+    final id = requestId;
+    try {
+      final current = await widget.resolveDisplay?.call();
+      if (id != requestId || !mounted) return;
+      if (current?.sessionId != activeDisplay?.sessionId ||
+          current?.displayId != activeDisplay?.displayId) {
+        await _stopNative();
+        if (mounted) setState(() => nativeError = '虚拟屏幕已变化，请重新连接');
+      }
+    } catch (error) {
+      if (id == requestId && mounted) {
+        await _stopNative();
+        if (mounted) setState(() => nativeError = '虚拟屏幕无法核验：$error');
+      }
+    } finally {
+      checkingDisplay = false;
     }
   }
 
